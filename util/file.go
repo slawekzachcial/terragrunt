@@ -170,15 +170,24 @@ func ReadFileAsString(path string) (string, error) {
 	return string(bytes), nil
 }
 
+func l(format string, a ...interface{}) {
+    fmt.Fprintf(os.Stderr, format, a...)
+}
+
 // Copy the files and folders within the source folder into the destination folder. Note that hidden files and folders
 // (those starting with a dot) will be skipped. Will create a specified manifest file that contains paths of all copied files.
 func CopyFolderContents(source, destination, manifestFile string, includeInCopy []string) error {
+    l("=== CopyFolderContents(%s, %s, ...)\n", source, destination)
 	// Expand all the includeInCopy glob paths, converting the globbed results to relative paths so that they work in
 	// the copy filter.
 	includeExpandedGlobs := []string{}
 	for _, includeGlob := range includeInCopy {
 		globPath := filepath.Join(source, includeGlob)
+		l("### source: %s\n", source)
+		l("### includeGlob: %s\n", includeGlob)
+		l("### globPath: %s\n", globPath)
 		expandGlob, err := zglob.Glob(globPath)
+		l("### expandGlob: %s\n", expandGlob)
 		if err == os.ErrNotExist {
 			// we ignore not exist error as we only care about the globs that exist in the src dir
 			continue
@@ -186,28 +195,37 @@ func CopyFolderContents(source, destination, manifestFile string, includeInCopy 
 			return errors.WithStackTrace(err)
 		}
 		for _, expandGlobPath := range expandGlob {
+			l("### expandGlobPath: %s\n", expandGlobPath)
 			if filepath.IsAbs(expandGlobPath) {
 				expandGlobPath, err = GetPathRelativeTo(expandGlobPath, source)
+				l("### relative expandGlobPath: %s\n", expandGlobPath)
 				if err != nil {
 					return err
 				}
 			}
 			includeExpandedGlobs = append(includeExpandedGlobs, expandGlobPath)
+			l("### includeExpandedGlobs: %s\n", includeExpandedGlobs)
 		}
 	}
 
-	return CopyFolderContentsWithFilter(source, destination, manifestFile, func(path string) bool {
-		if ListContainsElement(includeExpandedGlobs, path) {
+	return CopyFolderContentsWithFilter(source, destination, manifestFile, func(absolutePath string) bool {
+		l(" === filter(absolutePath=%s)\n", absolutePath)
+		relativePath, err := GetPathRelativeTo(absolutePath, source)
+		l(" ### relativePath: %s\n", relativePath)
+		l(" ### ListContainsElement(%s, %s): %t\n", includeExpandedGlobs, relativePath, ListContainsElement(includeExpandedGlobs, relativePath))
+		l(" ### TerragruntExcludes(%s): %t\n", relativePath, TerragruntExcludes(relativePath))
+		if err == nil && ListContainsElement(includeExpandedGlobs, relativePath) {
 			return true
 		}
-		return !TerragruntExcludes(path)
+		return !TerragruntExcludes(relativePath)
 	})
 }
 
 // Copy the files and folders within the source folder into the destination folder. Pass each file and folder through
 // the given filter function and only copy it if the filter returns true. Will create a specified manifest file
 // that contains paths of all copied files.
-func CopyFolderContentsWithFilter(source, destination, manifestFile string, filter func(path string) bool) error {
+func CopyFolderContentsWithFilter(source, destination, manifestFile string, filter func(absolutePath string) bool) error {
+	l("=== CopyFolderContentsWithFilter(%s, %s, ...)\n", source, destination)
 	if err := os.MkdirAll(destination, 0700); err != nil {
 		return errors.WithStackTrace(err)
 	}
@@ -229,12 +247,14 @@ func CopyFolderContentsWithFilter(source, destination, manifestFile string, filt
 	}
 
 	for _, file := range files {
+		l("### file: %s\n", file)
 		fileRelativePath, err := GetPathRelativeTo(file, source)
+		l("### GetPathRelativeTo(%s, %s): %s\n", file, source, fileRelativePath)
 		if err != nil {
 			return err
 		}
 
-		if !filter(fileRelativePath) {
+		if !filter(file) {
 			continue
 		}
 
